@@ -1,0 +1,1089 @@
+#include <EEPROM.h>
+#include <Wire.h>
+#include "TimerOne.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
+
+
+#define OLED_ADDRESS 0x3C   // Dirección I2C de la pantalla OLED
+#define OLED_WIDTH 128      // Ancho de la pantalla OLED en píxeles
+#define OLED_HEIGHT 32      // Alto de la pantalla OLED en píxeles
+
+#define SDA_PIN 20           // Pin utilizado para la comunicación I2C SDA
+#define SCL_PIN 21  
+
+#define VERSION 111
+
+#define INTERRUPT_CLOCK  2
+#define INTERRUPT_RESET  3
+
+#define HOME_BUTTON  5
+#define STATUS_LED  4
+
+#define BUTTON_LATCH_PIN 11
+#define BUTTON_DATA_PIN 9
+#define BUTTON_CLOCK_PIN 10
+
+#define LEDS_LATCH_PIN A2
+#define LEDS_CLOCK_PIN A3
+#define LEDS_DATA_PIN A0
+
+#define TRIGGER_OUT_LATCH  7
+#define TRIGGER_OUT_CLOCK  8
+#define TRIGGER_OUT_DATA  6
+
+#define MODE_SELECT_TRACK 0
+#define MODE_TAP 1
+#define MODE_RANDOM 2
+#define MODE_DELETE 3
+#define MODE_MUTE 4
+#define MODE_FILL 5
+#define MODE_INVERSE 6
+#define MODE_PERFORMANCE 7
+#define MODE_LENGTH 8
+#define MODE_LENGTH_RESET 9
+#define MODE_GATE_RETRIGGER 10
+#define MODE_CLOCK 11
+#define MODE_AUTOPLAY 12
+#define MODE_NOTES 13
+#define MODE_WRITE 14
+#define MODE_UTIL 15
+#define MODE_HOME 16
+#define MODE_PATTERN_EDIT 17
+#define MODE_LENGTH_EDIT 18
+#define MODE_SET_CLOCK_DIVIDER 19
+#define MODE_SET_MIDI_CHANNEL 20
+
+#define PATTERN_MUTE 0
+#define PATTERN_FILL 1
+#define PATTERN_CURRENT_TICK 2
+#define PATTERN_RETRIGGER 3
+#define PATTERN_MIDI_CHANNEL 4
+#define PATTERN_LENGTH 5
+#define PATTERN_LENGTH_RESET 6
+#define PATTERN_CLOCK 7
+#define PATTERN_MIDI_NOTE_ON 8
+#define PATTERN_INVERSE 9
+#define PATTERN_BAR_LENGTH 10
+#define PATTERN_BAR_SELECTED 11
+#define PATTERN_BAR_0 12
+#define PATTERN_BAR_1 13
+#define PATTERN_BAR_2 14
+#define PATTERN_BAR_3 15
+#define PATTERN_BAR_4 16
+#define PATTERN_BAR_5 17
+#define PATTERN_BAR_6 18
+#define PATTERN_BAR_7 19
+
+unsigned long onClockHighTime = 0;
+unsigned long onClockLowTime = 0;
+boolean lightIsHigh = false;
+
+boolean debugMode=false;
+boolean debugTick=false;
+
+boolean isIdle = false;
+boolean wasIdle = false;
+int idleTick = 0;
+byte copyPatternMode = 8;
+byte autoPlayHot = false;
+byte autoPlayTick = 0;
+byte autoPlayRun = false;
+byte flipMode = false;
+long autoPlayTempo = 120;
+
+byte autoClockEnabled = 0;
+byte disableAnimations = 0;
+byte autoReset = 0;
+
+boolean performanceModeSettings[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+byte performanceModeCurrentPage = 0;
+byte currentTrack = 0;
+byte tick = 0;
+boolean clockIsHigh = false;
+byte currentMode;
+boolean buttonsEnabled = false;
+byte clock = 0;
+
+byte patternData[16][20] = {
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 1, 0, 0, 1, 9, 7, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
+
+byte triggerOutputData[2] = {0, 0};
+byte triggerOutputs[2][16] = {
+      {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 64, 128}, {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0}
+};
+
+byte animations[24][10] = {
+        /* STEP         */ {3, 2, 1, 4, 5, 10, 11, 14, 13, 12},
+        /* TAP          */ {0, 1, 5, 9, 13, 14, 10, 6, 2, 3},
+        /* RANDOM       */ {15, 10, 7, 2, 1, 0, 4, 8, 9, 12},
+        /* DELETE       */ {12, 8, 4, 0, 1, 2, 7, 11, 14, 13},
+        /* MUTE         */ {12, 8, 4, 0, 5, 6, 3, 7, 11, 15},
+        /* FILL         */ {10, 9, 12, 8, 4, 0, 1, 2, 3, 69},
+        /* INVERSE      */ { 1, 5, 9, 13, 14, 10, 6, 2, 69, 69},
+        /* PERFORM      */ {9, 10, 7, 2, 1, 0, 4, 8, 12, 69},
+        /* LENGTH       */ {0, 4, 8, 12, 13, 14, 15, 69, 69, 69},
+        /* LENGTH RESET */ {0, 4, 8, 12, 13, 14, 15, 7, 3, 2},
+        /* GATE         */ {11, 15, 14, 13, 8, 4, 1, 2, 3, 69},
+        /* CLOCK        */ {15, 14, 13, 8, 4, 1, 2, 3, 69, 69},
+        /* AUTOPLAY     */ {12, 8, 9, 4, 1, 2, 7, 10, 11, 15},
+        /* NOTES        */ {12, 8, 4, 0, 5, 10, 15, 11, 7, 3},
+        /* WRITE        */ {0, 4, 8, 12, 9, 10, 15, 11, 7, 3},
+        /* UTIL         */ {0, 4, 8, 13, 14, 11, 7, 3, 69, 69},
+        /* HOME         */ {13, 9, 5, 4, 1, 2, 7, 6, 10, 14},
+        /* INSIDE       */ {8, 4, 5, 1, 2, 7, 11, 10, 14, 13},
+        /* r            */ {7, 6, 5, 8, 12, 69, 69, 69, 69, 69},
+        /* o            */ {13, 14, 11, 6, 5, 8, 69, 69, 69, 69},
+        /* b            */ {0, 4, 8, 12, 13, 14, 11, 6, 5, 69},
+        /* a            */ {8, 13, 14, 15, 11, 7, 6, 5, 69, 69},
+        /* u            */ {4, 8, 13, 14, 11, 7, 69, 69, 69, 69},
+        /* x            */ {4, 9, 12, 7, 10, 15, 69, 69, 69, 69}
+};
+
+byte getLedState(byte led) {
+  // Lógica para determinar el estado del LED según el número del LED dado
+  // Puedes basarte en las condiciones y variables relacionadas al estado de los LED en tu código existente
+  // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+
+  // Ejemplo de lógica basada en tu código actual:
+  if (currentMode == MODE_HOME) {
+    byte currentChar = idleTick % 20;
+    byte currentAnimation = 18 + (idleTick / 20);
+    return (animations[currentAnimation][currentChar % 10] == led && currentChar < 10) ? 1 : 0;
+  } else if (currentMode == MODE_PERFORMANCE) {
+    // Lógica para determinar el estado del LED en el modo de rendimiento
+    // Puedes basarte en las condiciones y variables relacionadas al modo de rendimiento en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_AUTOPLAY) {
+    // Lógica para determinar el estado del LED en el modo de reproducción automática
+    // Puedes basarte en las condiciones y variables relacionadas al modo de reproducción automática en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_MUTE) {
+    // Lógica para determinar el estado del LED en el modo de silencio
+    // Puedes basarte en las condiciones y variables relacionadas al modo de silencio en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_FILL) {
+    // Lógica para determinar el estado del LED en el modo de relleno
+    // Puedes basarte en las condiciones y variables relacionadas al modo de relleno en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_UTIL) {
+    // Lógica para determinar el estado del LED en el modo de utilidad
+    // Puedes basarte en las condiciones y variables relacionadas al modo de utilidad en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_LENGTH_EDIT) {
+    // Lógica para determinar el estado del LED en el modo de edición de longitud
+    // Puedes basarte en las condiciones y variables relacionadas al modo de edición de longitud en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_SET_MIDI_CHANNEL) {
+    // Lógica para determinar el estado del LED en el modo de configuración del canal MIDI
+    // Puedes basarte en las condiciones y variables relacionadas al modo de configuración del canal MIDI en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_SET_CLOCK_DIVIDER) {
+    // Lógica para determinar el estado del LED en el modo de configuración del divisor de reloj
+    // Puedes basarte en las condiciones y variables relacionadas al modo de configuración del divisor de reloj en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_PATTERN_EDIT) {
+    // Lógica para determinar el estado del LED en el modo de edición de patrón
+    // Puedes basarte en las condiciones y variables relacionadas al modo de edición de patrón en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else if (currentMode == MODE_LENGTH_RESET || currentMode == MODE_GATE_RETRIGGER) {
+    // Lógica para determinar el estado del LED en los modos de reinicio de longitud y retrig de gate
+    // Puedes basarte en las condiciones y variables relacionadas a estos modos en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  } else {
+    // Lógica para determinar el estado del LED en otros modos no mencionados
+    // Puedes basarte en las condiciones y variables relacionadas a estos modos en tu código existente
+    // y devolver 1 si el LED está encendido o 0 si el LED está apagado
+  }
+}
+
+// Agrega esta función en alguna parte antes de su uso en updateOLED()
+byte getCurrentMode() {
+  // Aquí debes incluir la lógica para obtener el modo actual
+  // Puedes usar una variable global o cualquier otra implementación que estés utilizando en tu código
+  // Asegúrate de devolver el valor correcto del modo actual
+  // Por ejemplo, si estás usando una variable global llamada "currentMode":
+  
+  return currentMode;
+}
+
+byte switchVar1;
+byte switchVar2;
+
+//int buttonPos[2][16] = {{8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}, {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}};
+//int buttonPos[2][16] = {{1, 0, 7, 6, 3, 2, 5, 4, 10, 11, 8, 9, 14, 12, 13, 15}, {15, 12, 14, 13, 9, 8, 11, 10, 2, 3, 6, 7, 4, 5, 0, 1}};
+// Era la correcta int buttonPos[2][16] = {{8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}, {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}};
+int buttonPos[2][16] = {{8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}, {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7}};
+
+byte buttons0[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+byte buttons1[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+byte leds[2][8] = {  {1, 2, 4, 8, 16, 32, 64, 128},  {1, 2, 4, 8, 16, 32, 64, 128}};
+byte activeLeds[2] = {0, 0};
+
+int buttons[16] = {};
+int buttonStatus[16] = {};
+int lastPressed[16] = {};
+int currentPressed[16] = {};
+
+void setupButtonBoard() {
+        pinMode(LEDS_LATCH_PIN, OUTPUT);
+        pinMode(BUTTON_LATCH_PIN, OUTPUT);
+        pinMode(BUTTON_CLOCK_PIN, OUTPUT);
+        pinMode(BUTTON_DATA_PIN, INPUT);
+}
+
+void setLedValue(uint8_t led, boolean value) {
+        if (led < 16) {
+                led = flipMode ? 15 - led : led;
+                boolean top = led < 8;
+                int v = leds[top][led - (top ? 8 : 0)];
+                if (value && !(activeLeds[top] & v)) {
+                        activeLeds[top] += v;
+                } else if (!value && (activeLeds[top] & v)) {
+                        activeLeds[top] -= v;
+                }
+        }
+}
+
+void writeDisplay() {
+        digitalWrite(LEDS_LATCH_PIN, 0);
+        writeTriggers(LEDS_DATA_PIN, LEDS_CLOCK_PIN, activeLeds[0]);
+        writeTriggers(LEDS_DATA_PIN, LEDS_CLOCK_PIN, activeLeds[1]);
+        digitalWrite(LEDS_LATCH_PIN, 1);
+}
+byte getButtonIndex(byte button) {
+        return buttonPos[0][button];
+}
+byte shiftIn(int myBUTTON_DATA_PIN, int myBUTTON_CLOCK_PIN) {
+        int i;
+        int temp = 0;
+        int pinState;
+        byte myDataIn = 0;
+        pinMode(myBUTTON_CLOCK_PIN, OUTPUT);
+        pinMode(myBUTTON_DATA_PIN, INPUT);
+        for (i = 7; i >= 0; i--)  {
+                digitalWrite(myBUTTON_CLOCK_PIN, 0);
+                // delayMicroseconds(0.2);
+                temp = digitalRead(myBUTTON_DATA_PIN);
+                if (temp) {
+                        pinState = 1;
+                        myDataIn = myDataIn | (1 << i);
+                }
+                else {
+                        pinState = 0;
+                }
+                digitalWrite(myBUTTON_CLOCK_PIN, 1);
+
+        }
+        return myDataIn;
+}
+boolean readSwitches() {
+        for (byte foo = 0; foo < 16; foo++) {
+                lastPressed[foo] = currentPressed[foo];
+        }
+        digitalWrite(BUTTON_LATCH_PIN, 1);
+        delayMicroseconds(20);
+        digitalWrite(BUTTON_LATCH_PIN, 0);
+        switchVar1 = shiftIn(BUTTON_DATA_PIN, BUTTON_CLOCK_PIN);
+        switchVar2 = shiftIn(BUTTON_DATA_PIN, BUTTON_CLOCK_PIN);
+        for (int n = 0; n <= 7; n++) {
+                buttonStatus[getButtonIndex(n)] = switchVar1 & (1 << n) ? 1 : 0;
+                buttonStatus[getButtonIndex(n + 8)] = switchVar2 & (1 << n) ? 1 : 0;
+        }
+        for (byte foo = 0; foo < 16; foo++) {
+                lastPressed[foo] = currentPressed[foo];
+                currentPressed[foo] = buttonStatus[foo];
+        }
+        return true;
+}
+boolean justPressed(byte button) {
+        return lastPressed[button] != currentPressed[button] && currentPressed[button] == 1 ? true : false;
+}
+boolean justReleased(byte button) {
+        return lastPressed[button] != currentPressed[button] && currentPressed[button] == 0 ? true : false;
+}
+boolean clearButtons() {
+        for (byte foo = 0; foo < 16; foo++) {
+                lastPressed[foo] = currentPressed[foo] = 0;
+        }
+}
+void updateLightIsHigh() {
+    lightIsHigh = (millis() - onClockHighTime < ((onClockLowTime - onClockHighTime) >> 1));
+}
+
+boolean playAnimation(byte animation[]) {
+    if (disableAnimations) {
+        for (byte foo = 0; foo < 16; foo++) {
+            setLedValue(foo, false);
+        }
+        writeDisplay();
+        delay(30);
+        for (byte foo = 0; foo < 10; foo++) {
+            if (animation[foo] < 16) {
+                setLedValue(animation[foo], true);
+            }
+        }
+        writeDisplay();
+        delay(300);
+        for (byte foo = 0; foo < 16; foo++) {
+            setLedValue(foo, false);
+        }
+        writeDisplay();
+        delay(30);
+    } else {
+        for (byte foo = 0; foo < 16; foo++) {
+            setLedValue(foo, false);
+            writeDisplay();
+            delay(10);
+        }
+        for (byte foo = 0; foo < 10; foo++) {
+            if (animation[foo] < 16) {
+                setLedValue(animation[foo], true);
+                writeDisplay();
+                delay(20);
+            }
+        }
+        delay(200);
+        for (byte foo = 0; foo < 10; foo++) {
+            setLedValue(animation[foo], false);
+            writeDisplay();
+            delay(20);
+        }
+    }
+    return true;
+}
+
+byte pulseLight = 0;
+
+void updateDisplay() {
+    updateLightIsHigh();
+    pulseLight %= 5;
+    pulseLight++;
+    if (isIdle) {
+        idleTick %= 120;
+
+        byte currentChar = idleTick % 20;
+        byte currentAnimation = 18 + (idleTick / 20);
+
+        setLedValue(animations[currentAnimation][currentChar % 10], currentChar < 10);
+        idleTick += (animations[(18 + ((idleTick + 1) / 20))][((idleTick + 1) % 20) % 10] >= 16) ? 10 - idleTick % 10 : 1;
+        writeDisplay();
+    } else {
+        idleTick = 0;
+        for (uint8_t foo = 0; foo < 16; foo++) {
+            if (currentMode == MODE_HOME) {
+                setLedValue(foo, true);
+            } else if (currentMode == MODE_PERFORMANCE) {
+                boolean lightUp = false;
+                for (byte bar = 0; bar < 4; bar++) {
+                    byte track = (4 * performanceModeCurrentPage) + bar;
+                    lightUp = (foo == bar && performanceModeSettings[track] && getTrigger(track, patternData[track][PATTERN_CURRENT_TICK], patternData[track][PATTERN_LENGTH])) || (foo == bar && !performanceModeSettings[track] && patternData[track][PATTERN_MUTE] && !(lightIsHigh && getTrigger(track, patternData[track][PATTERN_CURRENT_TICK], patternData[track][PATTERN_LENGTH]) || (patternData[track][PATTERN_BAR_0] == 0 && patternData[track][PATTERN_BAR_1] == 0 ))) || ((foo == bar + 4) && !performanceModeSettings[track] && (lightIsHigh && patternData[track][PATTERN_FILL])) || ((foo == bar + 8) && performanceModeSettings[track]) || ((foo == bar + 12) && bar == performanceModeCurrentPage) ? true : lightUp;
+                }
+                setLedValue(foo, lightUp);
+            } else if (currentMode == MODE_AUTOPLAY) {
+                setLedValue(foo, (foo == 2  && autoClockEnabled && autoPlayTick % 4 == 0) || (foo == 3  && autoClockEnabled && autoPlayTick % 2 == 0) || ((foo == 8 || foo == 9 || foo == 12 || foo == 13) && autoClockEnabled) || ((foo == 10 || foo == 11 || foo == 14 || foo == 15) && !autoClockEnabled) || ((foo == 0 && autoClockEnabled) && autoPlayRun && autoPlayHot));
+            } else if (currentMode == MODE_MUTE) {
+                setLedValue(foo,(patternData[foo][PATTERN_BAR_0] + patternData[foo][PATTERN_BAR_1] + patternData[foo][PATTERN_BAR_2] + patternData[foo][PATTERN_BAR_3] + patternData[foo][PATTERN_BAR_4] + patternData[foo][PATTERN_BAR_5] + patternData[foo][PATTERN_BAR_6] + patternData[foo][PATTERN_BAR_7] == 0) || !patternData[foo][PATTERN_MUTE] || getTrigger(foo, patternData[foo][PATTERN_CURRENT_TICK], patternData[foo][PATTERN_LENGTH]) ? false : true);
+            } else if (currentMode == MODE_FILL) {
+                setLedValue(foo, patternData[foo][MODE_FILL] && !(lightIsHigh && getTrigger(foo, patternData[foo][PATTERN_CURRENT_TICK], patternData[foo][PATTERN_LENGTH]) || (patternData[foo][PATTERN_BAR_0] == 0 && patternData[foo][PATTERN_BAR_1] == 0)));
+            } else if (currentMode == MODE_UTIL) {
+                setLedValue(foo, (foo == 0 && disableAnimations) || (foo == 1 && autoReset) || (foo == 2 && flipMode));
+            } else if (currentMode == MODE_LENGTH_EDIT) {
+                setLedValue(foo, foo == patternData[currentTrack][PATTERN_LENGTH] || foo == patternData[currentTrack][PATTERN_BAR_LENGTH] + 8);
+            } else if (currentMode == MODE_SET_MIDI_CHANNEL) {
+                setLedValue(foo, foo == patternData[currentTrack][PATTERN_MIDI_CHANNEL]);
+            } else if (currentMode == MODE_SET_CLOCK_DIVIDER) {
+                setLedValue(foo, foo == patternData[currentTrack][PATTERN_CLOCK]);
+            } else if (currentMode == MODE_PATTERN_EDIT) {
+                setLedValue(foo, (patternData[currentTrack][PATTERN_BAR_LENGTH] == 1 && patternData[currentTrack][PATTERN_LENGTH] == 7) ? (getTrigger(currentTrack, foo, patternData[currentTrack][PATTERN_LENGTH]) && (tick % 16) != foo) || (!getTrigger(currentTrack, foo, patternData[currentTrack][PATTERN_LENGTH]) && (tick % 16) == foo) : foo < 8 ? patternData[currentTrack][PATTERN_BAR_SELECTED + patternData[currentTrack][PATTERN_BAR_SELECTED] + 1] & (1 << foo) ? true : false : foo >= 8 ? foo == patternData[currentTrack][PATTERN_BAR_SELECTED] + 8 ? (pulseLight > 1) : (copyPatternMode < 8 && foo == copyPatternMode + 8) ? false : foo < 9 + patternData[currentTrack][PATTERN_BAR_LENGTH] : false);
+            } else if (currentMode == MODE_LENGTH_RESET || currentMode == MODE_GATE_RETRIGGER) {
+                setLedValue(foo, patternData[foo][currentMode == MODE_GATE_RETRIGGER ? PATTERN_RETRIGGER : currentMode == MODE_LENGTH_RESET ? PATTERN_LENGTH_RESET : 0]);
+            } else {
+                setLedValue(foo, lightIsHigh && getTrigger(foo, patternData[foo][PATTERN_CURRENT_TICK], patternData[foo][PATTERN_LENGTH]));
+            }
+            if (currentMode == MODE_HOME || currentMode == MODE_SELECT_TRACK || currentMode == MODE_LENGTH || currentMode == MODE_NOTES || currentMode == MODE_CLOCK) {
+                setLedValue(foo, (tick % 16) != foo);
+            }
+        }
+        writeDisplay();
+    }
+}
+
+void saveData() {
+        EEPROM.write(0, VERSION);
+        EEPROM.write(1, autoClockEnabled);
+        EEPROM.write(2, disableAnimations);
+        EEPROM.write(3, autoReset);
+        EEPROM.write(4, autoPlayTempo);
+        EEPROM.write(5, flipMode);
+        for (byte foo = 0; foo < 16; foo++) {
+                EEPROM.write((foo * 12) + 6, steps2num(patternData[foo][PATTERN_LENGTH]) + (patternData[foo][PATTERN_LENGTH_RESET] * 128));
+                EEPROM.write((foo * 12) + 7, steps2num(patternData[foo][PATTERN_MIDI_CHANNEL]) + (patternData[foo][PATTERN_RETRIGGER] * 128));
+                EEPROM.write((foo * 12) + 8, steps2num(patternData[foo][PATTERN_CLOCK]));
+                EEPROM.write((foo * 12) + 9, patternData[foo][PATTERN_BAR_LENGTH]);
+                EEPROM.write((foo * 12) + 10, patternData[foo][PATTERN_BAR_0]);
+                EEPROM.write((foo * 12) + 11, patternData[foo][PATTERN_BAR_1]);
+                EEPROM.write((foo * 12) + 12, patternData[foo][PATTERN_BAR_2]);
+                EEPROM.write((foo * 12) + 13, patternData[foo][PATTERN_BAR_3]);
+                EEPROM.write((foo * 12) + 14, patternData[foo][PATTERN_BAR_4]);
+                EEPROM.write((foo * 12) + 15, patternData[foo][PATTERN_BAR_5]);
+                EEPROM.write((foo * 12) + 16, patternData[foo][PATTERN_BAR_6]);
+                EEPROM.write((foo * 12) + 17, patternData[foo][PATTERN_BAR_7]);
+        }
+}
+void factoryReset() {
+        autoClockEnabled = false;
+        enDisableAutoPlay();
+        autoPlayRun = false;
+        disableAnimations = 0;
+        autoReset = 1;
+        autoPlayTempo = 120;
+        flipMode = false;
+        for (byte foo = 0; foo < 16; foo++) {
+                patternData[foo][PATTERN_LENGTH] = 7;
+                patternData[foo][PATTERN_LENGTH_RESET] = 1;
+                patternData[foo][PATTERN_MIDI_CHANNEL] = 9;
+                patternData[foo][PATTERN_RETRIGGER] = 1;
+                patternData[foo][PATTERN_CLOCK] = 0;
+                patternData[foo][PATTERN_BAR_LENGTH] = 1;
+                patternData[foo][PATTERN_BAR_0] = foo == 0 ? 17 : foo == 1 ? 16 : foo == 2 ? 68 : foo == 12 ? 1 : foo == 13 ? 1 : foo == 14 ? 17 : foo == 15 ? 255 : 0;
+                patternData[foo][PATTERN_BAR_1] = foo == 0 ? 17 : foo == 1 ? 16 : foo == 2 ? 68 : foo == 3 ? 128 : foo == 13 ? 1 : foo == 14 ? 17 : foo == 15 ? 255 : 0;
+                patternData[foo][PATTERN_BAR_2] = 0;
+                patternData[foo][PATTERN_BAR_3] = 0;
+                patternData[foo][PATTERN_BAR_4] = 0;
+                patternData[foo][PATTERN_BAR_5] = 0;
+                patternData[foo][PATTERN_BAR_6] = 0;
+                patternData[foo][PATTERN_BAR_7] = 0;
+        }
+        onReset();
+        saveData();
+}
+
+
+void loadData() {
+        if (EEPROM.read(0) == VERSION) {
+                autoClockEnabled = EEPROM.read(1);
+                disableAnimations = EEPROM.read(2);
+                autoReset = EEPROM.read(3);
+                autoPlayTempo = EEPROM.read(4);
+                flipMode = EEPROM.read(5);
+                for (byte foo = 0; foo < 16; foo++) {
+
+                        byte val = EEPROM.read((foo * 12) + 6);
+                        patternData[foo][PATTERN_LENGTH] = num2steps(val);
+                        patternData[foo][PATTERN_LENGTH_RESET] = val & 1 << 7 ? 1 : 0;
+
+                        val = EEPROM.read((foo * 12) + 7);
+                        patternData[foo][PATTERN_MIDI_CHANNEL] = num2steps(val);
+                        patternData[foo][PATTERN_RETRIGGER] = val & 1 << 7 ? 1 : 0;
+
+                        val = EEPROM.read((foo * 12) + 8);
+                        patternData[foo][PATTERN_CLOCK] = num2steps(val);
+
+                        patternData[foo][PATTERN_BAR_LENGTH] = EEPROM.read((foo * 12) + 9);
+
+                        patternData[foo][PATTERN_BAR_0] = EEPROM.read((foo * 12) + 10);
+                        patternData[foo][PATTERN_BAR_1] = EEPROM.read((foo * 12) + 11);
+                        patternData[foo][PATTERN_BAR_2] = EEPROM.read((foo * 12) + 12);
+                        patternData[foo][PATTERN_BAR_3] = EEPROM.read((foo * 12) + 13);
+                        patternData[foo][PATTERN_BAR_4] = EEPROM.read((foo * 12) + 14);
+                        patternData[foo][PATTERN_BAR_5] = EEPROM.read((foo * 12) + 15);
+                        patternData[foo][PATTERN_BAR_6] = EEPROM.read((foo * 12) + 16);
+                        patternData[foo][PATTERN_BAR_7] = EEPROM.read((foo * 12) + 17);
+                }
+        } else {
+                factoryReset();
+        }
+}
+
+byte steps2num(byte s) {
+        return ((((s / 4) >> 0) % 2) << 1) + ((((s / 8) >> 0) % 2) << 2) + (1 << (((((s * 100) / 4) - (((s / 4) >> 0) * 100)) / 25) + 3));
+}
+
+byte num2steps(byte n) {
+        return (n & (1 << 1) ? 4 : 0) + (n & (1 << 2) ? 8 : 0) + (n & (1 << 3) ? 1 : 0) + (n & (1 << 4) ? 2 : 0) + (n & (1 << 5) ? 3 : 0) + (n & (1 << 6) ? 4 : 0) - 1;;
+}
+
+
+
+void resetFillInvert() {
+        for (byte foo = 0; foo < 16; foo++) {
+                patternData[foo][PATTERN_FILL] = false;
+                patternData[foo][PATTERN_INVERSE] = false;
+        }
+}
+void checkButtons() {
+        if (buttonsEnabled && readSwitches()) {
+                for (uint8_t foo = 0; foo < 16; foo++) {
+                        if (justPressed(flipMode ? 15 - foo : foo)) {
+                                resetIdle();
+                                if (currentMode == MODE_HOME) {
+                                        setMode(foo);
+                                        break;
+                                } else if (currentMode == MODE_AUTOPLAY) {
+                                       onModeAutoPlay(foo);
+                                } else if (currentMode == MODE_PERFORMANCE) {
+                                        onModePerformance(foo);
+                                } else if (currentMode == MODE_LENGTH_RESET) {
+                                        onModeLengthReset(foo);
+                                } else if (currentMode == MODE_INVERSE) {
+                                        onModeInverse(foo);
+                                }  else if (currentMode == MODE_GATE_RETRIGGER) {
+                                        onModeGateRetrigger(foo);
+                                } else if (currentMode == MODE_MUTE) {
+                                        onModeMute(foo);
+                                }  else if (currentMode == MODE_SET_CLOCK_DIVIDER) {
+                                        onModeSetClockDivider(foo);
+                                        break;
+                                } else if (currentMode == MODE_LENGTH_EDIT) {
+                                        onModeLengthEdit(foo);
+                                        break;
+                                } else if (currentMode == MODE_SET_MIDI_CHANNEL) {
+                                        onModeSetMidiChannel(foo);
+                                        break;
+                                } else if (currentMode == MODE_PATTERN_EDIT) {
+                                        onModePatternEdit(foo);
+                                } else if (currentMode == MODE_TAP) {
+                                        onModeTap(foo);
+                                } else if (currentMode == MODE_RANDOM) {
+                                        onModeRandom(foo);
+                                } else if (currentMode == MODE_FILL) {
+                                        onModeFill(foo);
+                                } else if (currentMode == MODE_DELETE) {
+                                        onModeDelete(foo);
+                                } else if (currentMode == MODE_UTIL) {
+                                        onModeUtil(foo);
+                                } else if (currentMode == MODE_SELECT_TRACK || currentMode == MODE_LENGTH || currentMode == MODE_NOTES || currentMode == MODE_CLOCK) {
+                                        onSelectTrack(foo);
+                                }
+                        }
+                        if (justReleased(flipMode ? 15 - foo : foo)) {
+                                onButtonReleased(foo);
+                        }
+                }
+        }
+}
+void onButtonReleased(uint8_t button) {
+        if (currentMode == MODE_FILL) {
+                patternData[button][PATTERN_FILL] = false;
+        } else if (currentMode == MODE_INVERSE) {
+                patternData[button][PATTERN_INVERSE] = false;
+        } else if ( currentMode == MODE_PERFORMANCE) {
+                for (byte bar = 0; bar < 4; bar++) {
+                        byte track = (4 * performanceModeCurrentPage) + bar;
+                        if (button == bar + 4) {
+                                if (!performanceModeSettings[track]) {
+                                        patternData[track][PATTERN_FILL] = false;
+                                }
+                        }
+                }
+        } else if (currentMode == MODE_PATTERN_EDIT) {
+                copyPatternMode = 8;
+        }
+}
+void onSelectTrack(uint8_t button) {
+        currentTrack = button;
+        if (currentMode == MODE_LENGTH) {
+                setMode(MODE_LENGTH_EDIT);
+        } else if (currentMode == MODE_SELECT_TRACK) {
+                for (byte foo = 0; foo < 16; foo++) {
+                        patternData[foo][PATTERN_BAR_SELECTED] = 0;
+                }
+                setMode(MODE_PATTERN_EDIT);
+        } else if (currentMode == MODE_NOTES) {
+                setMode(MODE_SET_MIDI_CHANNEL);
+        } else if (currentMode == MODE_CLOCK) {
+                setMode(MODE_SET_CLOCK_DIVIDER);
+        }
+}
+
+void onModeAutoPlay(uint8_t button) {
+        if (button >= 8 && button <= 15) {
+                autoClockEnabled = !autoClockEnabled;
+                if (!autoClockEnabled) {
+                        autoPlayRun = false;
+                        autoPlayHot = true;
+                }
+                enDisableAutoPlay();
+        } else if (button == 0) {
+                autoPlayRun = autoClockEnabled ? !autoPlayRun : false;
+                onReset();
+        } else if (button == 1) {
+                onReset();
+        }  if (button == 2) {
+                if (autoPlayTempo > 40) {
+                        autoPlayTempo--;
+                        setAutoPlayTempo();
+                }
+        }  if (button == 3) {
+                if (autoPlayTempo < 240) {
+                        autoPlayTempo++;
+                        setAutoPlayTempo();
+                }
+        }
+}
+void onModePerformance(uint8_t button) {
+        for (byte bar = 0; bar < 4; bar++) {
+                byte track = (4 * performanceModeCurrentPage) + bar;
+                if (button == bar) {
+                        if (performanceModeSettings[track]) {
+                                onModeTap(track);
+                        } else {
+                                onModeMute(track);
+                        }
+                }
+                if (button == bar + 4) {
+                        if (performanceModeSettings[track]) {
+                                onModeDelete(track);
+                        } else {
+                                patternData[track][PATTERN_FILL] = true;
+                        }
+                }
+                if (button == bar + 8) {
+                        performanceModeSettings[track] = !performanceModeSettings[track];
+                        resetFillInvert();
+                }
+                if (button == bar + 12) {
+                        performanceModeCurrentPage = bar;
+                        resetFillInvert();
+                }
+        }
+}
+
+void onModeLengthReset(uint8_t button) {
+        patternData[button][PATTERN_LENGTH_RESET] = !patternData[button][PATTERN_LENGTH_RESET];
+}
+void onModeGateRetrigger(uint8_t button) {
+        patternData[button][PATTERN_RETRIGGER] = !patternData[button][PATTERN_RETRIGGER];
+}
+void onModeMute(uint8_t button) {
+        if (patternData[button][PATTERN_BAR_0] + patternData[button][PATTERN_BAR_1] + patternData[button][PATTERN_BAR_2] + patternData[button][PATTERN_BAR_3] + patternData[button][PATTERN_BAR_4] + patternData[button][PATTERN_BAR_5] + patternData[button][PATTERN_BAR_6] + patternData[button][PATTERN_BAR_7] > 0) {
+                patternData[button][PATTERN_MUTE] = !patternData[button][PATTERN_MUTE];
+        }
+}
+void onModeSetClockDivider(uint8_t button) {
+        patternData[currentTrack][PATTERN_CLOCK] = button;
+}
+
+void onModeLengthEdit(uint8_t button) {
+        if (button < 8) {
+                patternData[currentTrack][PATTERN_LENGTH] = button;
+        } else {
+                patternData[currentTrack][PATTERN_BAR_LENGTH] = button - 8;
+        }
+}
+void onModeSetMidiChannel(uint8_t button) {
+        patternData[currentTrack][PATTERN_MIDI_CHANNEL] = button;
+}
+void onModePatternEdit(uint8_t button) {
+        if (patternData[currentTrack][PATTERN_BAR_LENGTH] == 1 && patternData[currentTrack][PATTERN_LENGTH] == 7) {
+                if (getTrigger(currentTrack, button, patternData[currentTrack][PATTERN_LENGTH])) {
+                        if (button < 8) {
+                                patternData[currentTrack][PATTERN_BAR_0] -= 1 << button;
+                        } else {
+                                patternData[currentTrack][PATTERN_BAR_1] -= 1 << ( button - 8 );
+                        }
+                } else {
+                        if (button < 8) {
+                                patternData[currentTrack][PATTERN_BAR_0] += 1 << button;
+                        } else {
+                                patternData[currentTrack][PATTERN_BAR_1] += 1 << ( button - 8 );
+                        }
+                }
+        } else {
+                if (button >= 8) {
+                        if (copyPatternMode < 8) {
+                                patternData[currentTrack][PATTERN_BAR_SELECTED + 1 + (button - 8)] = patternData[currentTrack][PATTERN_BAR_SELECTED + 1 + copyPatternMode];
+                                copyPatternMode = 8;
+                        } else {
+                                patternData[currentTrack][PATTERN_BAR_SELECTED] = button - 8;
+                                copyPatternMode = button - 8;
+                        }
+                } else {
+                        if (patternData[currentTrack][PATTERN_BAR_SELECTED + patternData[currentTrack][PATTERN_BAR_SELECTED] + 1] & (1 << button)) {
+                                patternData[currentTrack][PATTERN_BAR_SELECTED + patternData[currentTrack][PATTERN_BAR_SELECTED] + 1] -= 1 << button;
+                        } else {
+                                patternData[currentTrack][PATTERN_BAR_SELECTED + patternData[currentTrack][PATTERN_BAR_SELECTED] + 1] += 1 << button;
+                        }
+                }
+        }
+}
+
+void onModeTap(uint8_t button) {
+        if (!getTrigger(button, patternData[button][PATTERN_CURRENT_TICK], patternData[button][PATTERN_LENGTH])) {
+                patternData[button][PATTERN_BAR_SELECTED + 1 + (patternData[button][PATTERN_CURRENT_TICK] / 8)] += 1 << (patternData[button][PATTERN_CURRENT_TICK] % 8);
+        }
+}
+void onModeInverse(uint8_t button) {
+        patternData[button][PATTERN_INVERSE] = !patternData[button][PATTERN_INVERSE];
+}
+void onModeRandom(uint8_t button) {
+        patternData[button][PATTERN_BAR_0] = random(0, 255);
+        patternData[button][PATTERN_BAR_1] = random(0, 255);
+        patternData[button][PATTERN_BAR_2] = random(0, 255);
+        patternData[button][PATTERN_BAR_3] = random(0, 255);
+        patternData[button][PATTERN_BAR_4] = random(0, 255);
+        patternData[button][PATTERN_BAR_5] = random(0, 255);
+        patternData[button][PATTERN_BAR_6] = random(0, 255);
+        patternData[button][PATTERN_BAR_7] = random(0, 255);
+}
+void onModeFill(uint8_t button) {
+        patternData[button][PATTERN_FILL] = true;
+}
+void onModeDelete(uint8_t button) {
+        patternData[button][PATTERN_BAR_0] = patternData[button][PATTERN_BAR_1] = patternData[button][PATTERN_BAR_2] = patternData[button][PATTERN_BAR_3] = patternData[button][PATTERN_BAR_4] = patternData[button][PATTERN_BAR_5] = patternData[button][PATTERN_BAR_6] = patternData[button][PATTERN_BAR_7] = 0;
+        patternData[button][PATTERN_MUTE] = true;
+}
+boolean getTrigger(byte track, byte tick, byte length) {
+        return (patternData[track][PATTERN_BAR_SELECTED + 1 + (tick / (length + 1))] & (1 << (tick % (length + 1))));
+}
+void onReset() {
+        if(!debugMode) {
+                if (tick > 1 || autoClockEnabled) {
+                        for (byte foo = 0; foo < 16; foo++) {
+                                patternData[foo][PATTERN_CURRENT_TICK] = 0;
+                        }
+                        tick = 0;
+                        autoPlayHot = true;
+                        autoPlayTick = 0;
+                }
+        }
+}
+void onClock() {
+        if(!debugMode) {
+                clockIsHigh = autoClockEnabled ? autoPlayHot && autoPlayRun ? true : false : digitalRead(INTERRUPT_CLOCK);
+
+                if (clockIsHigh) {
+                        onClockLowTime = onClockHighTime;
+                        onClockHighTime = millis();
+
+
+                }
+                if (autoReset) {
+                        if (onClockHighTime > 1000 + onClockLowTime) {
+                                onReset();
+                        }
+                }
+                updateLightIsHigh();
+
+                autoPlayHot = !autoPlayHot;
+
+                autoPlayTick %= 64;
+                tick %= 64;
+
+                updateTrigger(clockIsHigh);
+
+                tick += clockIsHigh;
+                autoPlayTick += clockIsHigh;
+        }
+}
+
+void updateTrigger(boolean hot) {
+        triggerOutputData[0] = triggerOutputData[1] = 0;
+        byte lngth = 0;
+        for (byte foo = 0; foo < 16; foo++) {
+                if (tick == 0 && patternData[foo][PATTERN_LENGTH_RESET] && patternData[foo][PATTERN_CLOCK] == 0) {
+                        patternData[foo][PATTERN_CURRENT_TICK] = 0;
+                }
+                lngth = (patternData[foo][PATTERN_LENGTH] + 1) * (patternData[foo][PATTERN_BAR_LENGTH] + 1);
+                patternData[foo][PATTERN_CURRENT_TICK] %= lngth;
+                boolean validClock = hot && tick % (patternData[foo][PATTERN_CLOCK] + 1) == 0;
+
+                boolean playTrigger = false;
+                // Is Trigger
+                playTrigger = validClock && getTrigger(foo, patternData[foo][PATTERN_CURRENT_TICK], patternData[foo][PATTERN_LENGTH]) ? true : playTrigger;
+                // Retrigger
+                playTrigger = !patternData[foo][PATTERN_RETRIGGER] && !validClock  && getTrigger(foo, (patternData[foo][PATTERN_CURRENT_TICK] - 1 + lngth) % lngth,   patternData[foo][PATTERN_LENGTH]) ? true : playTrigger;
+                // Is Muted
+                playTrigger = !patternData[foo][PATTERN_MUTE] ? false : playTrigger;
+                // Is Invers
+                playTrigger  = validClock &&  patternData[foo][PATTERN_INVERSE] ? !playTrigger : playTrigger;
+                // Is Fill
+                playTrigger =  validClock && patternData[foo][PATTERN_FILL] ? true : playTrigger;
+
+                if (playTrigger) {
+                        triggerOutputData[0] += triggerOutputs[0][flipMode ? 15 - foo : foo];
+                        triggerOutputData[1] += triggerOutputs[1][flipMode ? 15 - foo : foo];
+                }
+                if (validClock) {
+                        patternData[foo][PATTERN_CURRENT_TICK]++;
+                }
+                /* DO MIDI*/
+                if (playTrigger && !patternData[foo][PATTERN_MIDI_NOTE_ON]) {
+                        Serial.write(0x90 + patternData[foo][PATTERN_MIDI_CHANNEL]);
+                        Serial.write(36 + (flipMode ? 15 - foo : foo));
+                        Serial.write(100);
+                } else if (!playTrigger && patternData[foo][PATTERN_MIDI_NOTE_ON]) {
+                        Serial.write(0x90 + patternData[foo][PATTERN_MIDI_CHANNEL]);
+                        Serial.write(36 + (flipMode ? 15 - foo : foo));
+                        Serial.write(0);
+                }
+                patternData[foo][PATTERN_MIDI_NOTE_ON] = playTrigger;
+                /* /DO MIDI */
+        }
+        digitalWrite(TRIGGER_OUT_LATCH, 0);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, triggerOutputData[0]);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, triggerOutputData[1]);
+        digitalWrite(TRIGGER_OUT_LATCH, 1);
+        digitalWrite(STATUS_LED, currentMode == MODE_HOME ? clockIsHigh  : HIGH);
+
+}
+void writeTriggers(int dataPin, int clockPin, byte data) {
+        int i = 0;
+        pinMode(clockPin, OUTPUT);
+        pinMode(dataPin, OUTPUT);
+        digitalWrite(dataPin, 0);
+        digitalWrite(clockPin, 0);
+        for (i = 7; i >= 0; i--) {
+                digitalWrite(clockPin, 0);
+                digitalWrite(dataPin, data & (1 << i) ? 1 : 0);
+                digitalWrite(clockPin, 1);
+                digitalWrite(dataPin, 0);
+        }
+        digitalWrite(clockPin, 0);
+}
+
+
+void setAutoPlayTempo() {
+        Timer1.setPeriod(map(autoPlayTempo, 40, 240, 93000, 15000));
+}
+void enDisableAutoPlay() {
+        if (autoClockEnabled) {
+                detachInterrupt(digitalPinToInterrupt(INTERRUPT_CLOCK));
+                detachInterrupt(digitalPinToInterrupt(INTERRUPT_RESET));
+                Timer1.initialize(map(autoPlayTempo, 40, 240, 93000, 15000));
+                Timer1.attachInterrupt(onClock);
+        } else {
+                Timer1.detachInterrupt();
+                attachInterrupt(digitalPinToInterrupt(INTERRUPT_CLOCK), onClock, HIGH);
+                attachInterrupt(digitalPinToInterrupt(INTERRUPT_RESET), onReset, CHANGE);
+        }
+}
+
+void setup() {
+        Serial.begin(31250);
+        randomSeed(analogRead(4));
+
+        pinMode(TRIGGER_OUT_LATCH, OUTPUT);
+        digitalWrite(TRIGGER_OUT_LATCH, 0);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, 0);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, 0);
+        digitalWrite(TRIGGER_OUT_LATCH, 1);
+
+        pinMode(STATUS_LED, OUTPUT);
+        pinMode(HOME_BUTTON, INPUT);
+
+        setupButtonBoard();
+        loadData();
+
+        delay(200);
+
+        initSequencer();
+
+        // Inicialización de la pantalla OLED
+        display.begin(SSD1306_SWITCHCAPVCC, 0x3C); // Inicializar la pantalla OLED. Asegúrate de ajustar la dirección I2C si es necesario.
+        display.display(); // Mostrar pantalla en blanco al inicio
+        delay(2000); // Esperar 2 segundos
+
+}
+
+
+
+void startDebugMode(){
+        debugMode=true;
+}
+
+void stopDebugMode(){
+        debugMode=false;
+}
+void onDebugMode(){
+        delay(30);
+        debugTick=!debugTick;
+        activeLeds[0]=activeLeds[1]=triggerOutputData[0]=triggerOutputData[1]=0;
+        if(readSwitches()) {
+                for (uint8_t foo = 0; foo < 16; foo++) {
+                        if (justPressed(foo)) {
+                                setLedValue(foo,true);
+                                triggerOutputData[0]+=triggerOutputs[0][foo];
+                                triggerOutputData[1]+=triggerOutputs[1][foo];
+                        }
+                        if (justReleased(foo)) {
+                                setLedValue(foo,false);
+                        }
+                }
+                writeDisplay();
+                digitalWrite(TRIGGER_OUT_LATCH, 0);
+                writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, triggerOutputData[0]);
+                writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, triggerOutputData[1]);
+                digitalWrite(TRIGGER_OUT_LATCH, 1);
+                digitalWrite(STATUS_LED, debugTick);
+                if (digitalRead(HOME_BUTTON) == HIGH) {
+                        stopDebugMode();
+                }
+        }
+}
+
+void setMode(byte modeId) {
+        resetIdle();
+        if (modeId == MODE_WRITE) {
+                saveData();
+                playAnimation(animations[MODE_WRITE]);
+        } else {
+                buttonsEnabled = false;
+                currentMode = modeId;
+
+                resetFillInvert();
+
+                if (currentMode < 17) {
+                        playAnimation(animations[currentMode]);
+                } else {
+                        playAnimation(animations[17]);
+                }
+                buttonsEnabled = true;
+        }
+
+}
+void initSequencer() {
+        delay(500);
+        pinMode(INTERRUPT_CLOCK, INPUT_PULLUP);
+        pinMode(INTERRUPT_RESET, INPUT_PULLUP);
+        enDisableAutoPlay();
+        setMode(MODE_HOME);
+        tick = 0;
+        onReset();
+        digitalWrite(TRIGGER_OUT_LATCH, 0);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, 0);
+        writeTriggers(TRIGGER_OUT_DATA, TRIGGER_OUT_CLOCK, 0);
+        digitalWrite(TRIGGER_OUT_LATCH, 1);
+}
+
+void checkIdle() {
+        if(disableAnimations) {
+                resetIdle();
+        }else{
+                wasIdle = isIdle;
+                isIdle = millis() > 60000 + onClockHighTime;
+                if (wasIdle != isIdle) {
+                        for (byte foo = 0; foo < 16; foo++) {
+                                setLedValue(foo, false);
+                        }
+                        writeDisplay();
+                }
+        }
+}
+void resetIdle() {
+        wasIdle = isIdle = false;
+        onClockHighTime = millis() - 1;
+}
+
+void loop() {
+        if(debugMode) {
+                onDebugMode();
+        }else{
+                checkIdle();
+                delay(isIdle ? 120 : 30);
+                checkButtons();
+                updateDisplay();
+                if (digitalRead(HOME_BUTTON) == HIGH && (currentMode != MODE_HOME || isIdle)) {
+                        setMode(MODE_HOME);
+                }
+                
+          // Actualizar la pantalla OLED con el estado de los LEDs
+        updateOLED();
+    }
+
+}
+
+void updateOLED() {
+  display.clearDisplay(); // Limpiar la pantalla
+  
+  // Mostrar el nombre del modo actual
+  byte currentMode = getCurrentMode();
+  String modeName;
+  
+  switch (currentMode) {
+    case MODE_SELECT_TRACK:
+      modeName = "Step";
+      break;
+    case MODE_TAP:
+      modeName = "Tap";
+      break;
+    case MODE_RANDOM:
+      modeName = "Random";
+      break;
+    case MODE_DELETE:
+      modeName = "Delete";
+      break;
+    case MODE_PERFORMANCE:
+      modeName = "Performance";
+      break;
+    case MODE_MUTE:
+      modeName = "Mute";
+      break;
+    case MODE_FILL:
+      modeName = "Fill";
+      break;
+    case MODE_INVERSE:
+      modeName = "Inverse";
+      break;
+    case MODE_LENGTH:
+      modeName = "Lenght";
+      break;
+    case MODE_LENGTH_RESET:
+      modeName = "Lenght Reset";
+      break;
+    case MODE_GATE_RETRIGGER:
+      modeName = "Gate Retrigger";
+      break;
+    case MODE_CLOCK:
+      modeName = "Clock";
+      break;
+    case MODE_AUTOPLAY:
+      modeName = "Play";
+      break;
+    case MODE_NOTES:
+      modeName = "Notes";
+      break;
+    case MODE_WRITE:
+      modeName = "Write";
+      break;
+    case MODE_UTIL:
+      modeName = "Util";
+      break;
+    case MODE_HOME:
+      modeName = "Home";
+      break;
+
+    default:
+      modeName = "Unknown";
+      break;
+  }
+  
+  display.setTextSize(2); // Tamaño de fuente
+  display.setTextColor(WHITE); // Color del texto (blanco)
+  display.setCursor(0, 0); // Posición del texto en la pantalla
+  display.println(modeName);
+  display.display(); // Mostrar en pantalla
+}
